@@ -17,6 +17,7 @@ package com.google.android.exoplayer2.audio;
 
 import static com.google.android.exoplayer2.util.Assertions.checkNotNull;
 import static com.google.android.exoplayer2.util.Util.castNonNull;
+import static com.google.android.exoplayer2.util.Util.msToUs;
 import static com.google.android.exoplayer2.util.Util.durationUsToSampleCount;
 import static com.google.android.exoplayer2.util.Util.sampleCountToDurationUs;
 import static java.lang.Math.max;
@@ -25,10 +26,11 @@ import static java.lang.annotation.ElementType.TYPE_USE;
 
 import android.media.AudioTimestamp;
 import android.media.AudioTrack;
-import android.os.SystemClock;
+// import android.os.SystemClock;
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.util.Clock;
 import com.google.android.exoplayer2.util.Util;
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
@@ -163,6 +165,8 @@ import java.lang.reflect.Method;
   private static final int MIN_PLAYHEAD_OFFSET_SAMPLE_INTERVAL_US = 30_000;
   private static final int MIN_LATENCY_SAMPLE_INTERVAL_US = 50_0000;
 
+  private Clock clock;
+  
   private final Listener listener;
   private final long[] playheadOffsets;
 
@@ -220,6 +224,7 @@ import java.lang.reflect.Method;
       }
     }
     playheadOffsets = new long[MAX_PLAYHEAD_OFFSET_COUNT];
+    clock = Clock.DEFAULT;
   }
 
   /**
@@ -334,7 +339,7 @@ import java.lang.reflect.Method;
           Util.getPlayoutDurationForMediaDuration(
               mediaDurationSinceLastPositionUs, audioTrackPlaybackSpeed);
       long playoutStartSystemTimeMs =
-          System.currentTimeMillis() - Util.usToMs(playoutDurationSinceLastPositionUs);
+          clock.currentTimeMillis() - Util.usToMs(playoutDurationSinceLastPositionUs);
       listener.onPositionAdvancing(playoutStartSystemTimeMs);
     }
 
@@ -408,7 +413,7 @@ import java.lang.reflect.Method;
   public boolean isStalled(long writtenFrames) {
     return forceResetWorkaroundTimeMs != C.TIME_UNSET
         && writtenFrames > 0
-        && SystemClock.elapsedRealtime() - forceResetWorkaroundTimeMs
+        && clock.elapsedRealtime() - forceResetWorkaroundTimeMs
             >= FORCE_RESET_WORKAROUND_TIMEOUT_MS;
   }
 
@@ -420,7 +425,7 @@ import java.lang.reflect.Method;
    */
   public void handleEndOfStream(long writtenFrames) {
     stopPlaybackHeadPosition = getPlaybackHeadPosition();
-    stopTimestampUs = SystemClock.elapsedRealtime() * 1000;
+    stopTimestampUs = msToUs(clock.elapsedRealtime());
     endPlaybackHeadPosition = writtenFrames;
   }
 
@@ -461,6 +466,10 @@ import java.lang.reflect.Method;
     resetSyncParams();
     audioTrack = null;
     audioTimestampPoller = null;
+  }
+
+  public void setClock(Clock clock) {
+    this.clock = clock;
   }
 
   private void maybeSampleSyncParams() {
@@ -589,10 +598,10 @@ import java.lang.reflect.Method;
    * @return The playback head position, in frames.
    */
   private long getPlaybackHeadPosition() {
-    long currentTimeMs = SystemClock.elapsedRealtime();
+    long currentTimeMs = clock.elapsedRealtime();
     if (stopTimestampUs != C.TIME_UNSET) {
       // Simulate the playback head position up to the total number of frames submitted.
-      long elapsedTimeSinceStopUs = (currentTimeMs * 1000) - stopTimestampUs;
+      long elapsedTimeSinceStopUs = msToUs(currentTimeMs) - stopTimestampUs;
       long mediaTimeSinceStopUs =
           Util.getMediaDurationForPlayoutDuration(elapsedTimeSinceStopUs, audioTrackPlaybackSpeed);
       long framesSinceStop = durationUsToSampleCount(mediaTimeSinceStopUs, outputSampleRate);
